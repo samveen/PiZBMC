@@ -105,5 +105,8 @@ Exceptions:
 * [Raspberry Pi Zero Headless Quick Start](https://learn.adafruit.com/raspberry-pi-zero-creation/overview)
 * [Arduino Ethernet Module](https://www.google.com/search?q=arduino+ethernet+module) -> [ENC28J60](https://www.google.com/search?q=ENC28J60)
 
+* [IPMI 2.0 Technical Resources](https://www.intel.com/content/www/us/en/servers/ipmi/ipmi-technical-resources.html)
+
 * [Using screen to Connect to the Serial Console](https://docs.fedoraproject.org/en-US/Fedora/22/html/System_Administrators_Guide/sec-Using_screen_to_Connect_to_the_Serial_Console.html)
 * [RPi Serial Connection](https://elinux.org/RPi_Serial_Connection)
+* [Priviliged ports opening without user `root`](https://superuser.com/a/892391/246855)
