@@ -12,11 +12,13 @@ import struct
 import traceback
 import uuid
 
+import logging
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
 import pyghmi.ipmi.command as ipmicommand
 import pyghmi.ipmi.console as console
 import pyghmi.ipmi.private.serversession as serversession
 import pyghmi.ipmi.private.session as ipmisession
-
 
 __author__=""
 
@@ -29,13 +31,14 @@ class PiZBmc(serversession.IpmiServer):
     iohandler = None
 
     def __init__(self, authdata, port, address):
+        logger.info("BMC initialization started.")
         super(PiZBmc, self).__init__(authdata, port, address=address)
         self.powerstate = 'off'
         self.bootdevice = 'default'
         self.firmwaremajor = 0
         self.firmwareminor = 1
         self.mfgid = 58000 # IANA Enterprise number
-        self.prodid = 0x0100
+        self.prodid = 0x05
         with open('/sys/firmware/devicetree/base/serial-number') as f:
            pi_serial= f.read()
         project_uuid=uuid.uuid3(uuid.NAMESPACE_URL, "https://github.com/samveen/PiZBMC")
@@ -144,71 +147,94 @@ class PiZBmc(serversession.IpmiServer):
             raise NotImplementedError
 
     def handle_raw_request(self, request, session):
+        logger.info("Request[{:02x},{:02x},{}]".format(request['netfn'],request['command'],request['data']))
         try:
-            print("Request[{:02x},{:02x}]: ".format(request['netfn'],request['command']),end='')
             if request['netfn'] == 6: # Application requests
-                if request['command'] == 1:  # get device id
-                    return self.send_device_id(session)
-                elif request['command'] == 2:  # cold reset
-                    return session.send_ipmi_response(code=self.cold_reset())
-                elif request['command'] == 0x37:  # get device GUID
-                    return self.send_guid(session)
-                elif request['command'] == 0x48:  # activate payload
-                    return self.activate_payload(request, session)
-                elif request['command'] == 0x49:  # deactivate payload
-                    return self.deactivate_payload(request, session)
-                else:
-                    print("netfn 6, subcommand not handled")
-                    print(type(request))
-                    session.send_ipmi_response(code=0xc1)
-                    return
+                return self.route_application_requests(request,session)
             elif request['netfn'] == 0: # Chassis requests
-                if request['command'] == 1:  # get chassis status
-                    return self.get_chassis_status(session)
-                elif request['command'] == 2:  # chassis control
-                    return self.control_chassis(request, session)
-                elif request['command'] == 8:  # set boot options
-                    return self.set_system_boot_options(request, session)
-                elif request['command'] == 9:  # get boot options
-                    return self.get_system_boot_options(request, session)
-                else:
-                    print("netfn 1, subcommand not handled")
-                    session.send_ipmi_response(code=0xc1)
-                    return
-            print("not handled.'{}'".format(request['data']))
+                return self.route_chassis_requests(request, session)
+            logger.info("Unhandled request");
             session.send_ipmi_response(code=0xc1)
         except NotImplementedError:
-            print("Request not implemented");
+            logger.info("Request not implemented");
             session.send_ipmi_response(code=0xc1)
         except Exception:
             session._send_ipmi_net_payload(code=0xff)
             traceback.print_exc()
 
+    def route_chassis_requests(self, request, session):
+        logger.info("Request Type: Chassis")
+        if request['command'] == 1:  # get chassis status
+            return self.get_chassis_status(session)
+        elif request['command'] == 2:  # chassis control
+            return self.control_chassis(request, session)
+        elif request['command'] == 8:  # set boot options
+            return self.set_system_boot_options(request, session)
+        elif request['command'] == 9:  # get boot options
+            return self.get_system_boot_options(request, session)
+        else:
+            logger.info("Unhandled Chassis Sub-Command.")
+            return session.send_ipmi_response(code=0xc1)
+
+    def route_application_requests(self, request, session):
+        logger.info("Request Type: Application")
+        if request['command'] == 1:  # get device id
+            return self.send_device_id(session)
+        elif request['command'] == 2:  # [b]mc reset cold
+            return session.send_ipmi_response(code=self.cold_reset())
+        elif request['command'] == 3:  # [b]mc reset warm
+            return self.warm_reset(session)
+        elif request['command'] == 0x37:  # get device GUID
+            return self.send_guid(session)
+        elif request['command'] == 0x48:  # activate payload
+            return self.activate_payload(request, session)
+        elif request['command'] == 0x49:  # deactivate payload
+            return self.deactivate_payload(request, session)
+        else:
+            logger.info("Unhandled Application Sub-Command.")
+            session.send_ipmi_response(code=0xc1)
+            return
+
+    def send_device_id(self, session):
+        logger.info("Device ID requested.")
+        response = [self.deviceid, self.revision, self.firmwaremajor,
+                    self.firmwareminor, self.ipmiversion,
+                    self.additionaldevices]
+        response += struct.unpack('3B', struct.pack('<I', self.mfgid)[0:3])
+        response += struct.unpack('2B', struct.pack('<I', self.prodid)[0:2])
+        session.send_ipmi_response(data=response)
+
     def cold_reset(self):
         # Reset of the BMC, not managed system, here we will exit the demo
-        print('shutting down in response to BMC cold reset request')
+        logger.info('Cold BMC Reset requested. Shutting down.')
         sys.exit(0)
 
+    def warm_reset(self,session):
+        response = 0
+        session.send_ipmi_response(data=response)
+
     def get_power_state(self):
+        logger.info('Power Status requested.')
         return self.powerstate
 
     def power_off(self):
         # this should be power down without waiting for clean shutdown
         self.powerstate = 'off'
-        print('abruptly remove power')
+        logger.info('Power Off requested.')
 
     def power_on(self):
         self.powerstate = 'on'
-        print('powered on')
+        logger.info('Power On requested.')
 
     def power_cycle(self):
-        logger.info("IPMI BMC Power_Cycle request.")
+        logger.info("Power Cycle requested.")
         if self.powerstate == "off":
             self.powerstate = "on"
         else:
             self.powerstate = "off"
 
     def power_reset(self):
+        logger.info('Power Reset requested.')
         pass
 
     def pulse_diag(self):
@@ -216,21 +242,20 @@ class PiZBmc(serversession.IpmiServer):
 
     def power_shutdown(self):
         # should attempt a clean shutdown
-        print('politely shut down the system')
+        logger.info('OS Shutdown requested.')
         self.powerstate = 'off'
 
-    def get_power_state(self):
-        raise NotImplementedError
-
     def is_active(self):
+        logger.info('Power is_active requested.')
         return self.powerstate == 'on'
 
     def iohandler(self, data):
-        print(data)
+        logger.info(data)
         if self.sol:
             self.sol.send_data(data)
 
     def send_guid(self, session):
+        logger.info('BMC guid requested.')
         response = self.uuid.bytes
         session.send_ipmi_response(data=response)
 
