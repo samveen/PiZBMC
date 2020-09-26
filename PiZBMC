@@ -11,6 +11,7 @@ import logging
 import struct
 import traceback
 import uuid
+import ipaddress
 
 import logging
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -147,12 +148,14 @@ class PiZBmc(serversession.IpmiServer):
             raise NotImplementedError
 
     def handle_raw_request(self, request, session):
-        logger.info("Request[{:02x},{:02x},{}]".format(request['netfn'],request['command'],request['data']))
+        logger.info("Request[0x{:02x},0x{:02x},{}]".format(request['netfn'],request['command'],request['data']))
         try:
             if request['netfn'] == 6: # Application requests
                 return self.route_application_requests(request,session)
             elif request['netfn'] == 0: # Chassis requests
                 return self.route_chassis_requests(request, session)
+            elif request['netfn'] == 0x0c: # Transport requests
+                return self.route_transport_requests(request, session)
             logger.info("Unhandled request");
             session.send_ipmi_response(code=0xc1)
         except NotImplementedError:
@@ -176,6 +179,90 @@ class PiZBmc(serversession.IpmiServer):
             logger.info("Unhandled Chassis Sub-Command.")
             return session.send_ipmi_response(code=0xc1)
 
+    def route_transport_requests(self, request, session):
+        logger.info("Request Type: Transport")
+        if request['command'] == 2:  # get lan config
+            return self.get_lan_settings(request,session)
+        else:
+            logger.info("Unhandled Transport Sub-Command.")
+            return session.send_ipmi_response(code=0xc1)
+
+    def get_lan_settings(self, request, session):
+        channel = request['data'][0] & b'\x0f'[0]
+        param_sel = request['data'][1]
+        set_sel = request['data'][2]
+        block_sel = request['data'][3]
+        logger.info("LAN info for channel {} requested.".format(channel))
+        if channel== 0x0e:
+            channel == 1
+        response = [0x11] # Param revision
+        if param_sel == 0:
+            response += [1]
+        elif param_sel == 1:
+            response += [1]
+        elif param_sel == 2:
+            fields = 5
+            response += struct.unpack('{}B'.format(fields),bytearray(fields))
+        elif param_sel == 3:
+            response += struct.unpack('4B',ipaddress.ip_address("1.2.3.4").packed)  # 3 - IP
+        elif param_sel == 4:
+            response += [0x01]  #  4 - IP SOURCE
+        elif param_sel == 5:
+            response += struct.unpack('6B', struct.pack('<Q', 0x112233445566)[0:6]) # 5 - MAC
+        elif param_sel == 6:
+            response += ipaddress.ip_address("255.255.255.0").packed # 6 - NETMASK
+        elif param_sel == 7:
+            response += [0x40,0x40,0x10] # 7 - IPv4 Header params
+        elif param_sel == 8:
+            response += [0x02,0x6f]
+        elif param_sel == 9:
+            response += [0,0]
+        elif param_sel == 10:
+            response += [0]
+        elif param_sel == 11:
+            response += [0]
+        elif param_sel == 12:
+            response += ipaddress.ip_address("1.0.0.2").packed # 12 - Gateway
+        elif param_sel == 13:
+            response += struct.unpack('6B', struct.pack('<Q', 0x778899aabbcc)[0:6]) # 13 - Gateway MAC
+        elif param_sel == 14:
+            response += ipaddress.ip_address("0.0.0.0").packed # 14 - Gateway 2
+        elif param_sel == 15:
+            response += struct.unpack('6B', struct.pack('<Q', 0x000000000000)[0:6]) # 15 - Gateway MAC 2
+        elif param_sel == 16:
+            comm_str = b"public" # 16 - community string
+            response += struct.unpack('18B',comm_str+bytearray(18-len(comm_str)))
+        elif param_sel == 17:
+            response += [0]
+        elif param_sel == 18:
+            response += [0,0,0,0]
+        elif param_sel == 19:
+            response += [0,0,0, 0,0,0,0, 0,0,0,0,0,0]
+        elif param_sel == 20:
+            response += [0,0]
+        elif param_sel == 21:
+            response += [0]
+        elif param_sel == 22:
+            response += [0]
+        elif param_sel == 23:
+            fields=16
+            response += struct.unpack('{}B'.format(fields),bytearray(fields))
+        elif param_sel == 24:
+            fields=8
+            response += struct.unpack('{}B'.format(fields),bytearray(fields))
+        elif param_sel == 25:
+            fields=[0,0,0,0]
+        elif param_sel == 26:
+            fields=6
+            response += struct.unpack('{}B'.format(fields),bytearray(fields))
+        elif param_sel == 4:
+            response += [0] # 50 -IPv6 support
+        else:
+            return session.send_ipmi_response(code=0x80)
+
+        session.send_ipmi_response(data=response)
+
+
     def route_application_requests(self, request, session):
         logger.info("Request Type: Application")
         if request['command'] == 1:  # get device id
@@ -184,16 +271,49 @@ class PiZBmc(serversession.IpmiServer):
             return session.send_ipmi_response(code=self.cold_reset())
         elif request['command'] == 3:  # [b]mc reset warm
             return self.warm_reset(session)
+        elif request['command'] == 4:  # [b]mc self test
+            return self.selftest(session)
         elif request['command'] == 0x37:  # get device GUID
             return self.send_guid(session)
+        elif request['command'] == 0x41:  # get channel access
+            return self.get_channel_access(request, session)
+        elif request['command'] == 0x42:  # get channel info
+            return self.get_channel_info(request, session)
         elif request['command'] == 0x48:  # activate payload
             return self.activate_payload(request, session)
         elif request['command'] == 0x49:  # deactivate payload
             return self.deactivate_payload(request, session)
+        elif request['command'] == 0x59:  # getsysinfo
+            return self.getsysinfo(request, session)
         else:
             logger.info("Unhandled Application Sub-Command.")
-            session.send_ipmi_response(code=0xc1)
-            return
+            return session.send_ipmi_response(code=0xc1)
+
+    def get_channel_access(self, request, session):
+        channel = request['data'][0] & b'\x0f'[0]
+        access_type = request['data'][1] & b'\xc0'[0]
+        logger.info("channel access for channel {} requested.".format(channel))
+        if channel== 0x0e:
+            channel == 1
+        response =  [0x3b,0x04]
+        logger.info(response)
+        session.send_ipmi_response(data=response)
+
+    def get_channel_info(self, request, session):
+        channel = request['data'][0] & b'\x0f'[0]
+        logger.info("channel info for channel {} requested.".format(channel))
+        if channel== 0x0e:
+            channel == 1
+        response =  [channel] # Channel
+        response += [b'\x04'[0] & b'\x7f'[0]] # Channel medium type
+        response += [b'\x01'[0] & b'\x1f'[0]] # Channel protocol type
+        response += [(b'\x00'[0] & b'\xc0'[0])] # Session support - sessionless, no active session
+        response += struct.unpack('3B', struct.pack('<I', self.mfgid)[0:3]) # Verdor
+        response += [0xff,0] # Aux Channel info
+
+        logger.info(response)
+        session.send_ipmi_response(data=response)
+
 
     def send_device_id(self, session):
         logger.info("Device ID requested.")
@@ -258,6 +378,12 @@ class PiZBmc(serversession.IpmiServer):
         logger.info('BMC guid requested.')
         response = self.uuid.bytes
         session.send_ipmi_response(data=response)
+
+    def selftest(self, session):
+        raise NotImplementedError
+
+    def getsysinfo(self, request, session):
+        raise NotImplementedError
 
 
     @classmethod
