@@ -30,7 +30,7 @@ devices. There are already a lot of possible partial solutions for this:
 - POE shields
 - Network connected power switches
 - USB TTL Serial console cables
-- Existing Raspi BMC implementations (not IPMI, but custom interfaces) 
+- Existing Raspi BMC implementations (not IPMI, but custom interfaces)
 - OpenBMC
 - PYGHMI
 - ConPot, IPMISIM
@@ -55,7 +55,35 @@ devices. There are already a lot of possible partial solutions for this:
   ATA connector to hold the pins and tying the Zero against the pin holder using
   the end holes (which coincidentally line up perfectly with the header holes)
   allows for a well positioned set of pins. (TODO: add PIC)
-- Connect the ENC28J60 module to the zero. (TODO: more details)
+- Connect the ENC28J60 module to the zero as follows:
+  - Connect 7 lines of jumper cables between the ENC28J60 pins and the Pi Zero as
+    follows (Legend: Label/Application (Pin No.)):
+
+    | ENC28J60 | Pi Zero  |
+    |:--------:|:--------:|
+    | 5v   (1) | 5v Power (2) |
+    | GND  (2) | Ground (20)  |
+    | INT  (3) | GPIO 25 (22)|
+    | CLK  (4) | NC |
+    | SO   (5) | GPIO 9/SPI0 MISO (21)|
+    | WOL  (6) | NC |
+    | SCK  (7) | GPIO 11/SPI0 SCLK (23)|
+    | SI   (8) | GPIO 10/SPI0 MOSI (19)|
+    | RST  (9) | NC |
+    | CS  (10) | GPIO 8/SPI0 CE0 (24) |
+    | 3.3 (11) | NC |
+    | GND (12) | NC |
+
+   - An alternative power arrangement is to use 3.3v instead of 5v to power the
+     ENC28J60(or if the ENC28J60 has no 5v to 3v3 regulator like the AMS1117):
+
+     | ENC28J60 | Pi Zero  |
+     |:--------:|:--------:|
+     | 5v   (1) | NC |
+     | GND  (2) | NC |
+     | 3.3 (11) | 3v3 Power (17) |
+     | GND (12) | Ground (20) |
+
 - Connect the the UARTs of the 2 Raspberry Pis together (3 pins: GND and RX-TX swapped, in case you didn't figure that out).
 
 #### Pre-boot Software setup
@@ -67,7 +95,7 @@ devices. There are already a lot of possible partial solutions for this:
   - Mount the boot partition and add configuration to enable SPI and add the ENC28J60 overlay to the config.txt (TODO: Give snippet)
   - Mount the root FS partition and enable ssh service via systemd linking (TODO: Give Details)
 
-- Put in the respective SD cards and boot up everything. Monitor the DHCP server to ensure that the both the Pis get IP addresses. 
+- Put in the respective SD cards and boot up everything. Monitor the DHCP server to ensure that the both the Pis get IP addresses.
 
 #### Post boot setup
 ##### Pi Zero
@@ -81,7 +109,7 @@ devices. There are already a lot of possible partial solutions for this:
 
 ### Advantages
 The Raspberry Pi platform has been around long enough that most problems that I thought of and faced
-had already been faced by someone earlier and solved. I didn't have to do any hard solutions for 
+had already been faced by someone earlier and solved. I didn't have to do any hard solutions for
 anything, just the process of fitting together and then stitching all the pieces already in place.
 
 ### Alternatives not examined:
