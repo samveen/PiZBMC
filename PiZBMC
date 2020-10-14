@@ -204,7 +204,7 @@ class PiZBmc(serversession.IpmiServer):
             fields = 5
             response += struct.unpack('{}B'.format(fields),bytearray(fields))
         elif param_sel == 3:
-            response += struct.unpack('4B',ipaddress.ip_address("1.2.3.4").packed)  # 3 - IP
+            response += ipaddress.ip_address("1.2.3.4").packed  # 3 - IP
         elif param_sel == 4:
             response += [0x01]  #  4 - IP SOURCE
         elif param_sel == 5:
@@ -279,6 +279,10 @@ class PiZBmc(serversession.IpmiServer):
             return self.get_channel_access(request, session)
         elif request['command'] == 0x42:  # get channel info
             return self.get_channel_info(request, session)
+        elif request['command'] == 0x44:  # user requests
+            return self.get_user_summary(request, session)
+        elif request['command'] == 0x46:  # user requests
+            return self.get_user_name(request, session)
         elif request['command'] == 0x48:  # activate payload
             return self.activate_payload(request, session)
         elif request['command'] == 0x49:  # deactivate payload
@@ -288,6 +292,32 @@ class PiZBmc(serversession.IpmiServer):
         else:
             logger.info("Unhandled Application Sub-Command.")
             return session.send_ipmi_response(code=0xc1)
+
+    def send_device_id(self, session):
+        logger.info("Device ID requested.")
+        response = [self.deviceid, self.revision, self.firmwaremajor,
+                    self.firmwareminor, self.ipmiversion,
+                    self.additionaldevices]
+        response += struct.unpack('3B', struct.pack('<I', self.mfgid)[0:3])
+        response += struct.unpack('2B', struct.pack('<I', self.prodid)[0:2])
+        session.send_ipmi_response(data=response)
+
+    def cold_reset(self):
+        # Reset of the BMC, not managed system, here we will exit the demo
+        logger.info('Cold BMC Reset requested. Shutting down.')
+        sys.exit(0)
+
+    def warm_reset(self,session):
+        response = 0
+        session.send_ipmi_response(data=response)
+
+    def selftest(self, session):
+        raise NotImplementedError
+
+    def send_guid(self, session):
+        logger.info('BMC guid requested.')
+        response = self.uuid.bytes
+        session.send_ipmi_response(data=response)
 
     def get_channel_access(self, request, session):
         channel = request['data'][0] & b'\x0f'[0]
@@ -312,26 +342,32 @@ class PiZBmc(serversession.IpmiServer):
         response += [0xff,0] # Aux Channel info
 
         logger.info(response)
-        session.send_ipmi_response(data=response)
+        return session.send_ipmi_response(data=response)
 
+    def get_user_summary(self, request, session):
+        channel = request['data'][0] & b'\x0f'[0]
+        uid = request['data'][1] & b'\x3f'[0]
+        logger.info("info for user {} on channel {} requested.".format(uid,channel))
+        if channel== 0x0e:
+            channel == 1
 
-    def send_device_id(self, session):
-        logger.info("Device ID requested.")
-        response = [self.deviceid, self.revision, self.firmwaremajor,
-                    self.firmwareminor, self.ipmiversion,
-                    self.additionaldevices]
-        response += struct.unpack('3B', struct.pack('<I', self.mfgid)[0:3])
-        response += struct.unpack('2B', struct.pack('<I', self.prodid)[0:2])
-        session.send_ipmi_response(data=response)
+        response =  [0x0a] # Max no of UIDs
+        response += [0x40 | 0x0a] # Count of enabled UIDs
+        response += [0x00] # Count of UIDs with fixed names
+        response += [0x34] # Channel access
 
-    def cold_reset(self):
-        # Reset of the BMC, not managed system, here we will exit the demo
-        logger.info('Cold BMC Reset requested. Shutting down.')
-        sys.exit(0)
+        logger.info(response)
+        return session.send_ipmi_response(data=response)
 
-    def warm_reset(self,session):
-        response = 0
-        session.send_ipmi_response(data=response)
+    def get_user_name(self, request, session):
+        uid = request['data'][0] & b'\x3f'[0]
+        logger.info("name for user {} requested.".format(uid))
+
+        user_name=bytearray()
+        user_name.extend(map(ord, "user_{}".format(uid)))
+        response = struct.unpack('16B',user_name+bytearray(16-len(user_name)))
+
+        return session.send_ipmi_response(data=response)
 
     def get_power_state(self):
         logger.info('Power Status requested.')
@@ -373,14 +409,6 @@ class PiZBmc(serversession.IpmiServer):
         logger.info(data)
         if self.sol:
             self.sol.send_data(data)
-
-    def send_guid(self, session):
-        logger.info('BMC guid requested.')
-        response = self.uuid.bytes
-        session.send_ipmi_response(data=response)
-
-    def selftest(self, session):
-        raise NotImplementedError
 
     def getsysinfo(self, request, session):
         raise NotImplementedError
