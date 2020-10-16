@@ -38,7 +38,7 @@ class PiZBmc(serversession.IpmiServer):
         self.bootdevice = 'default'
         self.firmwaremajor = 0
         self.firmwareminor = 1
-        self.mfgid = 58000 # IANA Enterprise number
+        self.mfgid = 56448 # IANA Enterprise number
         self.prodid = 0x05
         with open('/sys/firmware/devicetree/base/serial-number') as f:
            pi_serial= f.read()
